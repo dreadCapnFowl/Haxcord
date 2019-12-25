@@ -14,36 +14,6 @@ class Haxcord
   {
     this.client = discordclient
     parent = this
-
-    this.User = class User {
-      constructor(user) {
-        this.id = user.id
-        this.username = user.username
-        this.discriminator = user.discriminator
-      }
-
-      getLastActive()
-      {
-          var a = this;
-          return new Promise(function(resolve, reject) {
-            fs.readFile(lastActiveFile, (err, cont) => {
-              if (err) {
-                reject(err)
-              } else {
-                resolve(JSON.parse(cont)[a.id])
-              }
-            })
-        })
-      }
-    }
-
-    this.Attachment = class Attachment {
-      constructor(attachment) {
-        this.id = attachment.id
-        this.url = attachment.url
-        this.filename = attachment.filename
-      }
-    }
   }
 
   setClient(client)
@@ -97,6 +67,19 @@ class Science {
       this.data.userID = []
 
       fse.outputFile(this.filePaths.userID, '{}')
+         .then(() => {
+         })
+         .catch(err => {
+         });
+    })
+
+    // Load presences
+    this.loadPresences().then(presences => {
+      this.data.presences = presences
+    }).catch(e => {
+      this.data.presences = {}
+
+      fse.outputFile(this.filePaths.presences, '{}')
          .then(() => {
          })
          .catch(err => {
@@ -193,6 +176,35 @@ class Science {
 
     })
   }
+  savePresences() {
+    var a = this;
+    return new Promise(function(resolve, reject) {
+      fs.writeFile(a.filePaths.presences, JSON.stringify(a.data.presences), err => {
+        if (err) reject(err)
+        else resolve()
+      })
+    })
+  }
+  loadPresences() {
+    var a = this;
+    return new Promise(function(resolve, reject) {
+
+      fs.stat(a.filePaths.presences, function(err, stat) {
+          if(err == null) { // Exists
+              fs.readFile(a.filePaths.presences, (err, cont) => {
+                if (err) {
+                  reject(err)
+                } else {
+                  resolve(JSON.parse(cont.toString()))
+                }
+              })
+          } else if(err.code == 'ENOENT') { // Doesn't exist
+              reject(err)
+          }
+      })
+
+    })
+  }
 
   saveEverything() {
     var a = this
@@ -200,7 +212,11 @@ class Science {
       a.saveMessages().then(() => {
           a.saveUserID().then(() => {
             a.saveLastActive().then(() => {
-              resolve()
+              a.savePresences().then(() => {
+                resolve()
+              }).catch(e => {
+                reject(e)
+              })
             }).catch(e => {
               reject(e)
             })
@@ -233,6 +249,26 @@ class Science {
     })
   }
 
+  presenceEvent(oldMember, newMember) {
+      var a = this;
+      return new Promise(function(resolve, reject) {
+        if (!a.data.presences[newMember.user.id])
+          a.data.presences[newMember.user.id] = []
+
+          a.data.presences[newMember.user.id].push(
+          new Presence(newMember.presence)
+        )
+
+        a.updateUserIDList(newMember.user.id)
+        a.updateLastActivity(newMember.user.id)
+        a.saveEverything().then(() => {
+          resolve()
+        }).catch(e => {
+          reject(e)
+        })
+    })
+  }
+
   updateUserIDList(id) {
     if (!this.data.userID.includes(id))
       this.data.userID.push(id)
@@ -240,6 +276,33 @@ class Science {
 
   updateLastActivity(id) {
     this.data.lastActive[id] = Date.now()
+  }
+  fetchAuthorMessages(id)
+  {
+    return this.data.messages[id]
+  }
+  fetchUserPresences(id)
+  {
+    return this.data.presences[id]
+  }
+  fetchMessage(id)
+  {
+    var a = this;
+    return new Promise(function(resolve, reject) {
+      for (var k in a.data.messages)
+      {
+        var author = a.data.messages[k];
+        for (var k in author)
+        {
+          if (author[k].id == id) {
+            resolve(author[k])
+            return;
+          }
+        }
+
+      }
+      reject('Cannot find key.')
+    })
   }
 }
 
@@ -267,7 +330,11 @@ class Message
     var a = this;
     return new Promise(function(resolve, reject) {
       a.client.channels.get(a.chanID).fetchMessage(a.id).then(m => {
-        resolve(m.attachments)
+        var att = [];
+        m.attachments.forEach(attachment => {
+          att.push(new Attachment(attachment))
+        })
+        resolve(att)
       }).catch(e => {
         reject(e)
       })
@@ -298,6 +365,47 @@ class Message
   }
 }
 
+class Attachment {
+  constructor(attachment) {
+    this.id = attachment.id
+    this.url = attachment.url
+    this.filename = attachment.filename
+  }
+}
+
+class Presence {
+  constructor(presence) {
+    this.clientStatus = presence.clientStatus,
+    this.game = presence.game,
+    this.status = presence.status,
+    this.timestamp = Date.now()
+  }
+}
+
+class User {
+  constructor(user) {
+    this.id = user.id
+    this.username = user.username
+    this.discriminator = user.discriminator
+  }
+
+  getLastActive()
+  {
+      var a = this;
+      return new Promise(function(resolve, reject) {
+        fs.readFile(lastActiveFile, (err, cont) => {
+          if (err) {
+            reject(err)
+          } else {
+            resolve(JSON.parse(cont)[a.id])
+          }
+        })
+    })
+  }
+}
+
+module.exports.User = User
+module.exports.Attachment = Attachment
 module.exports.Message = Message
 module.exports.Haxcord = Haxcord
 module.exports.Science = Science
